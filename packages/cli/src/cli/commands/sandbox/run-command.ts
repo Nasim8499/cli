@@ -1,0 +1,55 @@
+import type { Command } from "commander";
+import type { CLIContext, RunCommandResult } from "@/cli/types.js";
+import { Base44Command } from "@/cli/utils/index.js";
+import { getAppContext } from "@/core/project/index.js";
+import { runCommand } from "@/core/resources/sandbox/api.js";
+import { CHECKPOINT_HELP, parsePositiveInt, toJsonStdout } from "./shared.js";
+
+interface RunCommandOptions {
+  cwd?: string;
+  timeoutMs?: string;
+}
+
+async function runCommandAction(
+  { runTask, branchId }: CLIContext,
+  commandParts: string[],
+  options: RunCommandOptions,
+): Promise<RunCommandResult> {
+  const { id: appId } = getAppContext();
+  const timeoutMs = parsePositiveInt(options.timeoutMs, "--timeout-ms");
+  const command = commandParts.join(" ");
+
+  const result = await runTask("Running command", () =>
+    runCommand(appId, {
+      command,
+      cwd: options.cwd,
+      timeout_ms: timeoutMs,
+      branch_id: branchId,
+    }),
+  );
+
+  // The HTTP call succeeded, so the CLI exits 0 regardless of the remote
+  // command's exit code — that code is reported in the JSON output.
+  return { outroMessage: "Ran command", stdout: toJsonStdout(result) };
+}
+
+export function getSandboxRunCommandCommand(): Command {
+  return new Base44Command("run", { supportsBranch: true })
+    .description("Run a shell command in an app's remote sandbox")
+    .argument("<command...>", "Shell command to execute (quote to keep as one)")
+    .option("--cwd <path>", "Working directory relative to the app root")
+    .option(
+      "--timeout-ms <n>",
+      "Timeout in milliseconds (default 120000, max 600000)",
+    )
+    .addHelpText(
+      "after",
+      `
+A command that changes files needs a checkpoint too.${CHECKPOINT_HELP}
+
+Examples:
+  $ base44 sandbox run "npm test"
+  $ base44 sandbox run ls -la --cwd src`,
+    )
+    .action(runCommandAction);
+}
